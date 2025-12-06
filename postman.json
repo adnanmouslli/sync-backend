@@ -1,0 +1,210 @@
+{
+	"info": {
+		"_postman_id": "database-api-collection",
+		"name": "HR Arabic Database API",
+		"description": "مجموعة API لإدارة قاعدة البيانات - فحص الاتصال، جلب الجداول، وجلب المحتويات",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Database Operations",
+			"item": [
+				{
+					"name": "فحص اتصال قاعدة البيانات",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/check-connection",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"check-connection"
+							]
+						},
+						"description": "فحص حالة الاتصال بقاعدة البيانات والتأكد من أنها تعمل بشكل صحيح"
+					},
+					"response": []
+				},
+				{
+					"name": "جلب جميع الجداول",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/tables",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"tables"
+							]
+						},
+						"description": "جلب قائمة بجميع الجداول الموجودة في قاعدة البيانات مع معلومات عن كل جدول"
+					},
+					"response": []
+				},
+				{
+					"name": "جلب محتويات جدول معين",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/table/:tableName",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"table",
+								":tableName"
+							],
+							"variable": [
+								{
+									"key": "tableName",
+									"value": "employees",
+									"description": "اسم الجدول المراد جلب محتوياته"
+								}
+							]
+						},
+						"description": "جلب جميع البيانات والأعمدة من جدول معين"
+					},
+					"response": []
+				},
+				{
+					"name": "معلومات تفصيلية عن جدول",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/table/:tableName/info",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"table",
+								":tableName",
+								"info"
+							],
+							"variable": [
+								{
+									"key": "tableName",
+									"value": "employees",
+									"description": "اسم الجدول المراد الحصول على معلوماته"
+								}
+							]
+						},
+						"description": "جلب معلومات تفصيلية عن جدول معين (الأعمدة، المفاتيح الأساسية، أنواع البيانات)"
+					},
+					"response": []
+				}
+			],
+			"description": "مجموعة العمليات المتعلقة بقاعدة البيانات"
+		},
+		{
+			"name": "Examples - أمثلة",
+			"item": [
+				{
+					"name": "جلب محتويات جدول Departments",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/table/departments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"table",
+								"departments"
+							]
+						},
+						"description": "مثال: جلب محتويات جدول الأقسام"
+					},
+					"response": []
+				},
+				{
+					"name": "جلب محتويات جدول Employees",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/table/employees",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"table",
+								"employees"
+							]
+						},
+						"description": "مثال: جلب محتويات جدول الموظفين"
+					},
+					"response": []
+				},
+				{
+					"name": "معلومات جدول Attendance",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/database/table/attendance/info",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"database",
+								"table",
+								"attendance",
+								"info"
+							]
+						},
+						"description": "مثال: جلب معلومات تفصيلية عن جدول الحضور"
+					},
+					"response": []
+				}
+			],
+			"description": "أمثلة على استخدام الـ APIs مع جداول شائعة"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:3000",
+			"type": "string"
+		}
+	]
+}
