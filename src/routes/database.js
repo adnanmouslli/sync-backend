@@ -258,20 +258,47 @@ router.get('/table/:tableName/info', async (req, res, next) => {
  * Query Parameters:
  * - period: last_month, last_week, last_3_months, last_year, today
  */
+/**
+ * جلب المواد حسب المستودعات مع فلتر الفترة الزمنية
+ * Query Parameters:
+ * - limit: عدد المواد المطلوبة (اختياري - يتم تجاهله إذا كان هناك فلتر تاريخ)
+ * - period: last_month, last_week, last_3_months, last_year, today
+ */
 router.get('/materials-by-stores', async (req, res, next) => {
     try {
         const pool = await getPool();
         
         // قراءة البارامترات
-        const limit = parseInt(req.query.limit, 10) || 100;
-        const safeLimit = Math.min(Math.max(limit, 1), 10000);
         const storeCodeFilter = req.query.storeCode;
         let startDate = req.query.startDate;
         let endDate = req.query.endDate;
-        const period = req.query.period; // جديد
+        const period = req.query.period;
         const groupGuid = req.query.groupGuid;
         const search = req.query.search;
         const minQty = parseFloat(req.query.minQty) || 0;
+        
+        // تحديد الـ limit بذكاء:
+        // - إذا كان هناك فلتر تاريخ (period أو startDate/endDate) ولم يتم تحديد limit صراحةً → لا limit
+        // - إذا لم يكن هناك فلتر تاريخ → استخدام limit الافتراضي (100)
+        // - إذا تم تحديد limit صراحةً → استخدامه دائماً
+        
+        const hasDateFilter = period || startDate || endDate;
+        const limitProvided = req.query.limit !== undefined;
+        
+        let useLimit = false;
+        let safeLimit = 10000; // قيمة افتراضية كبيرة
+        
+        if (limitProvided) {
+            // المستخدم حدد limit صراحةً
+            useLimit = true;
+            const limit = parseInt(req.query.limit, 10);
+            safeLimit = Math.min(Math.max(limit, 1), 10000);
+        } else if (!hasDateFilter) {
+            // لا يوجد فلتر تاريخ ولم يتم تحديد limit → استخدام الافتراضي
+            useLimit = true;
+            safeLimit = 100;
+        }
+        // else: يوجد فلتر تاريخ ولم يتم تحديد limit → لا نستخدم limit
         
         // حساب التاريخ بناءً على الفترة المحددة
         if (period && !startDate && !endDate) {
@@ -279,55 +306,57 @@ router.get('/materials-by-stores', async (req, res, next) => {
             
             switch (period) {
                 case 'today':
-                    startDate = new Date(now.setHours(0, 0, 0, 0)).toISOString().split('T')[0];
-                    endDate = new Date(now.setHours(23, 59, 59, 999)).toISOString().split('T')[0];
+                    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+                    const todayEnd = new Date(now.setHours(23, 59, 59, 999));
+                    startDate = todayStart.toISOString().split('T')[0];
+                    endDate = todayEnd.toISOString().split('T')[0];
                     break;
                     
                 case 'last_week':
                     const lastWeek = new Date();
                     lastWeek.setDate(lastWeek.getDate() - 7);
                     startDate = lastWeek.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'last_month':
                     const lastMonth = new Date();
                     lastMonth.setMonth(lastMonth.getMonth() - 1);
                     startDate = lastMonth.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'last_3_months':
                     const last3Months = new Date();
                     last3Months.setMonth(last3Months.getMonth() - 3);
                     startDate = last3Months.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'last_6_months':
                     const last6Months = new Date();
                     last6Months.setMonth(last6Months.getMonth() - 6);
                     startDate = last6Months.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'last_year':
                     const lastYear = new Date();
                     lastYear.setFullYear(lastYear.getFullYear() - 1);
                     startDate = lastYear.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'current_month':
                     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
                     startDate = firstDayOfMonth.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
                     
                 case 'current_year':
                     const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
                     startDate = firstDayOfYear.toISOString().split('T')[0];
-                    endDate = now.toISOString().split('T')[0];
+                    endDate = new Date().toISOString().split('T')[0];
                     break;
             }
         }
@@ -369,6 +398,9 @@ router.get('/materials-by-stores', async (req, res, next) => {
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const havingClause = havingConditions.length > 0 ? `HAVING ${havingConditions.join(' AND ')}` : '';
         
+        // بناء الاستعلام مع أو بدون TOP
+        const topClause = useLimit ? `TOP (@limit)` : '';
+        
         const query = `
             WITH MaterialsInStores AS (
                 SELECT 
@@ -398,13 +430,18 @@ router.get('/materials-by-stores', async (req, res, next) => {
                     tg.Name, tg.GUID
                 ${havingClause}
             )
-            SELECT TOP (@limit) *
+            SELECT ${topClause} *
             FROM MaterialsInStores
             WHERE store_qty > 0
             ORDER BY store_code, material_name
         `;
         
-        let request = pool.request().input('limit', sql.Int, safeLimit);
+        let request = pool.request();
+        
+        // إضافة limit فقط إذا كان سيتم استخدامه
+        if (useLimit) {
+            request = request.input('limit', sql.Int, safeLimit);
+        }
         
         if (storeCodeFilter) {
             request = request.input('storeCodeFilter', sql.NVarChar, storeCodeFilter);
@@ -492,7 +529,8 @@ router.get('/materials-by-stores', async (req, res, next) => {
             message: 'تم جلب المواد حسب المستودعات بنجاح',
             timestamp: new Date().toISOString(),
             filters: {
-                limit: safeLimit,
+                limit_applied: useLimit,
+                limit_value: useLimit ? safeLimit : 'غير محدد',
                 storeCode: storeCodeFilter || 'الكل',
                 period: period || 'custom',
                 startDate: startDate || null,
