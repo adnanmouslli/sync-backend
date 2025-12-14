@@ -253,6 +253,11 @@ router.get('/table/:tableName/info', async (req, res, next) => {
  * - groupGuid: معرف مجموعة المواد
  * - search: البحث في اسم أو كود المادة
  */
+/**
+ * جلب المواد حسب المستودعات مع فلتر الفترة الزمنية
+ * Query Parameters:
+ * - period: last_month, last_week, last_3_months, last_year, today
+ */
 router.get('/materials-by-stores', async (req, res, next) => {
     try {
         const pool = await getPool();
@@ -260,39 +265,94 @@ router.get('/materials-by-stores', async (req, res, next) => {
         // قراءة البارامترات
         const limit = parseInt(req.query.limit, 10) || 100;
         const safeLimit = Math.min(Math.max(limit, 1), 10000);
-        const storeCodeFilter = req.query.storeCode; // '12', '101', '102' أو null
-        const startDate = req.query.startDate; // YYYY-MM-DD
-        const endDate = req.query.endDate; // YYYY-MM-DD
+        const storeCodeFilter = req.query.storeCode;
+        let startDate = req.query.startDate;
+        let endDate = req.query.endDate;
+        const period = req.query.period; // جديد
         const groupGuid = req.query.groupGuid;
         const search = req.query.search;
         const minQty = parseFloat(req.query.minQty) || 0;
+        
+        // حساب التاريخ بناءً على الفترة المحددة
+        if (period && !startDate && !endDate) {
+            const now = new Date();
+            
+            switch (period) {
+                case 'today':
+                    startDate = new Date(now.setHours(0, 0, 0, 0)).toISOString().split('T')[0];
+                    endDate = new Date(now.setHours(23, 59, 59, 999)).toISOString().split('T')[0];
+                    break;
+                    
+                case 'last_week':
+                    const lastWeek = new Date();
+                    lastWeek.setDate(lastWeek.getDate() - 7);
+                    startDate = lastWeek.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'last_month':
+                    const lastMonth = new Date();
+                    lastMonth.setMonth(lastMonth.getMonth() - 1);
+                    startDate = lastMonth.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'last_3_months':
+                    const last3Months = new Date();
+                    last3Months.setMonth(last3Months.getMonth() - 3);
+                    startDate = last3Months.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'last_6_months':
+                    const last6Months = new Date();
+                    last6Months.setMonth(last6Months.getMonth() - 6);
+                    startDate = last6Months.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'last_year':
+                    const lastYear = new Date();
+                    lastYear.setFullYear(lastYear.getFullYear() - 1);
+                    startDate = lastYear.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'current_month':
+                    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    startDate = firstDayOfMonth.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+                    
+                case 'current_year':
+                    const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
+                    startDate = firstDayOfYear.toISOString().split('T')[0];
+                    endDate = now.toISOString().split('T')[0];
+                    break;
+            }
+        }
         
         // بناء شروط WHERE ديناميكية
         let whereConditions = ["st.Code IN ('12', '101', '102')"];
         let havingConditions = [];
         
-        // فلتر المستودع
         if (storeCodeFilter && ['12', '101', '102'].includes(storeCodeFilter)) {
             whereConditions.push(`st.Code = @storeCodeFilter`);
         }
         
-        // فلتر المجموعة
         if (groupGuid) {
             whereConditions.push(`mt.GroupGUID = @groupGuid`);
         }
         
-        // فلتر البحث
         if (search) {
             whereConditions.push(`(mt.Name LIKE @search OR mt.Code LIKE @search)`);
         }
         
-        // فلتر الكمية الدنيا
         if (minQty > 0) {
             havingConditions.push(`SUM(mi.Qty) >= @minQty`);
         }
         
-        // فلتر التاريخ (على جدول MI000)
-        let dateFilter = '';
+        // فلتر التاريخ
         if (startDate || endDate) {
             const dateConditions = [];
             if (startDate) {
@@ -309,7 +369,6 @@ router.get('/materials-by-stores', async (req, res, next) => {
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const havingClause = havingConditions.length > 0 ? `HAVING ${havingConditions.join(' AND ')}` : '';
         
-        // الاستعلام الرئيسي
         const query = `
             WITH MaterialsInStores AS (
                 SELECT 
@@ -345,7 +404,6 @@ router.get('/materials-by-stores', async (req, res, next) => {
             ORDER BY store_code, material_name
         `;
         
-        // إنشاء الطلب وإضافة البارامترات
         let request = pool.request().input('limit', sql.Int, safeLimit);
         
         if (storeCodeFilter) {
@@ -391,7 +449,6 @@ router.get('/materials-by-stores', async (req, res, next) => {
             }
         };
         
-        // ملء البيانات
         result.recordset.forEach(row => {
             const storeCode = row.store_code;
             
@@ -418,10 +475,8 @@ router.get('/materials-by-stores', async (req, res, next) => {
             }
         });
         
-        // تحويل إلى مصفوفة وحذف المستودعات الفارغة إذا كان هناك فلتر
         let response = Object.values(stores);
         
-        // إذا كان هناك فلتر مستودع، نعرض المستودع المطلوب فقط
         if (storeCodeFilter) {
             response = response.filter(store => store.code === storeCodeFilter);
         }
@@ -439,6 +494,7 @@ router.get('/materials-by-stores', async (req, res, next) => {
             filters: {
                 limit: safeLimit,
                 storeCode: storeCodeFilter || 'الكل',
+                period: period || 'custom',
                 startDate: startDate || null,
                 endDate: endDate || null,
                 groupGuid: groupGuid || null,
@@ -646,5 +702,31 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
         next(error);
     }
 });
+
+
+
+
+
+// // 1. جلب أول 50 مادة من جميع المستودعات
+// GET /api/database/materials-by-stores?limit=50
+
+// // 2. جلب مواد المستودع 102 فقط
+// GET /api/database/materials-by-stores?storeCode=102
+
+// // 3. جلب المواد حسب تاريخ الإنتاج
+// GET /api/database/materials-by-stores?startDate=2024-01-01&endDate=2024-12-31
+
+// // 4. البحث عن مادة معينة
+// GET /api/database/materials-by-stores?search=كيتامين
+
+// // 5. جلب المواد بكمية أكبر من 100
+// GET /api/database/materials-by-stores?minQty=100
+
+// // 6. دمج عدة فلاتر
+// GET /api/database/materials-by-stores?storeCode=102&limit=20&minQty=50&search=فرو
+
+// // 7. جلب مواد مستودع محدد مع ترتيب
+// GET /api/database/materials-by-store/102?sortBy=qty&sortOrder=desc&limit=30
+
 
 module.exports = router;
