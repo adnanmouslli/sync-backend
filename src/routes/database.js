@@ -84,8 +84,15 @@ router.get('/tables', async (req, res, next) => {
 router.get('/table/:tableName', async (req, res, next) => {
     try {
         const { tableName } = req.params;
+
+        // قراءة limit من query ووضع قيمة افتراضية
+        const limit = parseInt(req.query.limit, 10) || 100;
+
+        // حماية إضافية (اختياري)
+        const safeLimit = Math.min(Math.max(limit, 1), 1000);
+
         const pool = await getPool();
-        
+
         // التحقق من وجود الجدول
         const checkTableQuery = `
             SELECT COUNT(*) AS table_exists
@@ -93,18 +100,18 @@ router.get('/table/:tableName', async (req, res, next) => {
             WHERE TABLE_NAME = @tableName
             AND TABLE_TYPE = 'BASE TABLE'
         `;
-        
+
         const checkResult = await pool.request()
             .input('tableName', sql.NVarChar, tableName)
             .query(checkTableQuery);
-        
+
         if (checkResult.recordset[0].table_exists === 0) {
             return res.status(404).json({
                 success: false,
                 message: `الجدول '${tableName}' غير موجود`
             });
         }
-        
+
         // جلب معلومات الأعمدة
         const columnsQuery = `
             SELECT 
@@ -117,24 +124,32 @@ router.get('/table/:tableName', async (req, res, next) => {
             WHERE TABLE_NAME = @tableName
             ORDER BY ORDINAL_POSITION
         `;
-        
+
         const columnsResult = await pool.request()
             .input('tableName', sql.NVarChar, tableName)
             .query(columnsQuery);
-        
-        // جلب جميع البيانات من الجدول
-        const dataQuery = `SELECT * FROM [${tableName}]`;
-        const dataResult = await pool.request().query(dataQuery);
-        
-        // جلب عدد السجلات
+
+        // جلب البيانات مع limit
+        const dataQuery = `
+            SELECT TOP (@limit) *
+            FROM [${tableName}]
+        `;
+
+        const dataResult = await pool.request()
+            .input('limit', sql.Int, safeLimit)
+            .query(dataQuery);
+
+        // جلب عدد السجلات الكامل
         const countQuery = `SELECT COUNT(*) AS total_rows FROM [${tableName}]`;
         const countResult = await pool.request().query(countQuery);
-        
+
         res.json({
             success: true,
             message: 'تم جلب محتويات الجدول بنجاح',
             table_name: tableName,
             total_rows: countResult.recordset[0].total_rows,
+            returned_rows: dataResult.recordset.length,
+            limit: safeLimit,
             columns: columnsResult.recordset.map(col => ({
                 name: col.COLUMN_NAME,
                 type: col.DATA_TYPE,
@@ -144,11 +159,12 @@ router.get('/table/:tableName', async (req, res, next) => {
             })),
             data: dataResult.recordset
         });
-        
+
     } catch (error) {
         next(error);
     }
 });
+
 
 /**
  * جلب معلومات تفصيلية عن جدول معين
