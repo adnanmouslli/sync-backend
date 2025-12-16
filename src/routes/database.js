@@ -600,26 +600,239 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
 
 
 
-// // 1. جلب أول 50 مادة من جميع المستودعات
-// GET /api/database/materials-by-stores?limit=50
 
-// // 2. جلب مواد المستودع 102 فقط
-// GET /api/database/materials-by-stores?storeCode=102
 
-// // 3. جلب المواد حسب تاريخ الإنتاج
-// GET /api/database/materials-by-stores?startDate=2024-01-01&endDate=2024-12-31
 
-// // 4. البحث عن مادة معينة
-// GET /api/database/materials-by-stores?search=كيتامين
 
-// // 5. جلب المواد بكمية أكبر من 100
-// GET /api/database/materials-by-stores?minQty=100
+/**
+ * جلب معلومات المستودعات مع عدد المواد
+ * GET /api/database/stores-summary
+ */
+router.get('/stores-summary', async (req, res, next) => {
+    try {
+        const pool = await getPool();
+        
+        const query = `
+            SELECT 
+                st.Code AS store_code,
+                st.Name AS store_name,
+                st.GUID AS store_guid,
+                st.IsActive AS is_active,
+                COUNT(DISTINCT mt.GUID) AS materials_count,
+                SUM(ISNULL(mi.Qty, 0)) AS total_quantity,
+                COUNT(mi.GUID) AS total_transactions
+            FROM st000 st
+            LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID
+            LEFT JOIN mt000 mt ON mi.MatGUID = mt.GUID
+            WHERE st.Code IN ('12', '101', '102')
+            GROUP BY st.Code, st.Name, st.GUID, st.IsActive
+            ORDER BY st.Code
+        `;
+        
+        const result = await pool.request().query(query);
+        
+        const stores = result.recordset.map(row => ({
+            code: row.store_code,
+            name: row.store_name,
+            guid: row.store_guid,
+            is_active: row.is_active,
+            materials_count: row.materials_count,
+            total_quantity: row.total_quantity,
+            total_transactions: row.total_transactions
+        }));
+        
+        // إحصائيات إجمالية
+        const summary = {
+            total_stores: stores.length,
+            total_materials_all_stores: stores.reduce((sum, s) => sum + s.materials_count, 0),
+            total_quantity_all_stores: stores.reduce((sum, s) => sum + s.total_quantity, 0),
+            active_stores: stores.filter(s => s.is_active).length
+        };
+        
+        res.json({
+            success: true,
+            message: 'تم جلب معلومات المستودعات بنجاح',
+            timestamp: new Date().toISOString(),
+            summary: summary,
+            stores: stores
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
 
-// // 6. دمج عدة فلاتر
-// GET /api/database/materials-by-stores?storeCode=102&limit=20&minQty=50&search=فرو
+/**
+ * جلب معلومات مستودع واحد
+ * GET /api/database/store-summary/:storeCode
+ */
+router.get('/store-summary/:storeCode', async (req, res, next) => {
+    try {
+        const { storeCode } = req.params;
+        const pool = await getPool();
+        
+        // التحقق من كود المستودع
+        if (!['12', '101', '102'].includes(storeCode)) {
+            return res.status(400).json({
+                success: false,
+                message: 'كود المستودع غير صحيح. يجب أن يكون: 12، 101، أو 102'
+            });
+        }
+        
+        const query = `
+            SELECT 
+                st.Code AS store_code,
+                st.Name AS store_name,
+                st.GUID AS store_guid,
+                st.IsActive AS is_active,
+                st.Address AS address,
+                st.Keeper AS keeper,
+                COUNT(DISTINCT mt.GUID) AS materials_count,
+                SUM(ISNULL(mi.Qty, 0)) AS total_quantity,
+                COUNT(mi.GUID) AS total_transactions,
+                AVG(ISNULL(mi.Price, 0)) AS avg_price,
+                MAX(mi.ProductionDate) AS last_transaction_date
+            FROM st000 st
+            LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID
+            LEFT JOIN mt000 mt ON mi.MatGUID = mt.GUID
+            WHERE st.Code = @storeCode
+            GROUP BY st.Code, st.Name, st.GUID, st.IsActive, st.Address, st.Keeper
+        `;
+        
+        const result = await pool.request()
+            .input('storeCode', sql.NVarChar, storeCode)
+            .query(query);
+        
+        if (result.recordset.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'المستودع غير موجود'
+            });
+        }
+        
+        const store = result.recordset[0];
+        
+        res.json({
+            success: true,
+            message: 'تم جلب معلومات المستودع بنجاح',
+            timestamp: new Date().toISOString(),
+            store: {
+                code: store.store_code,
+                name: store.store_name,
+                guid: store.store_guid,
+                is_active: store.is_active,
+                address: store.address,
+                keeper: store.keeper,
+                materials_count: store.materials_count,
+                total_quantity: store.total_quantity,
+                total_transactions: store.total_transactions,
+                avg_price: store.avg_price,
+                last_transaction_date: store.last_transaction_date
+            }
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
 
-// // 7. جلب مواد مستودع محدد مع ترتيب
-// GET /api/database/materials-by-store/102?sortBy=qty&sortOrder=desc&limit=30
+/**
+ * جلب قائمة بسيطة بأسماء المستودعات فقط
+ * GET /api/database/stores-list
+ */
+router.get('/stores-list', async (req, res, next) => {
+    try {
+        const pool = await getPool();
+        
+        const query = `
+            SELECT 
+                Code AS code,
+                Name AS name,
+                GUID AS guid,
+                IsActive AS is_active
+            FROM st000
+            WHERE Code IN ('12', '101', '102')
+            ORDER BY Code
+        `;
+        
+        const result = await pool.request().query(query);
+        
+        res.json({
+            success: true,
+            message: 'تم جلب قائمة المستودعات بنجاح',
+            count: result.recordset.length,
+            stores: result.recordset
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+/**
+ * جلب إحصائيات مفصلة لكل مستودع مع تصنيف المواد
+ * GET /api/database/stores-detailed-stats
+ */
+router.get('/stores-detailed-stats', async (req, res, next) => {
+    try {
+        const pool = await getPool();
+        
+        const query = `
+            SELECT 
+                st.Code AS store_code,
+                st.Name AS store_name,
+                tg.Name AS group_name,
+                COUNT(DISTINCT mt.GUID) AS materials_count,
+                SUM(ISNULL(mi.Qty, 0)) AS total_quantity
+            FROM st000 st
+            LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID
+            LEFT JOIN mt000 mt ON mi.MatGUID = mt.GUID
+            LEFT JOIN TypesGroup000 tg ON mt.GroupGUID = tg.GUID
+            WHERE st.Code IN ('12', '101', '102')
+            GROUP BY st.Code, st.Name, tg.Name
+            HAVING SUM(ISNULL(mi.Qty, 0)) > 0
+            ORDER BY st.Code, tg.Name
+        `;
+        
+        const result = await pool.request().query(query);
+        
+        // تجميع البيانات حسب المستودع
+        const storesMap = {};
+        
+        result.recordset.forEach(row => {
+            if (!storesMap[row.store_code]) {
+                storesMap[row.store_code] = {
+                    code: row.store_code,
+                    name: row.store_name,
+                    total_materials: 0,
+                    total_quantity: 0,
+                    groups: []
+                };
+            }
+            
+            storesMap[row.store_code].total_materials += row.materials_count;
+            storesMap[row.store_code].total_quantity += row.total_quantity;
+            storesMap[row.store_code].groups.push({
+                group_name: row.group_name || 'غير مصنف',
+                materials_count: row.materials_count,
+                quantity: row.total_quantity
+            });
+        });
+        
+        const stores = Object.values(storesMap);
+        
+        res.json({
+            success: true,
+            message: 'تم جلب الإحصائيات المفصلة بنجاح',
+            timestamp: new Date().toISOString(),
+            total_stores: stores.length,
+            stores: stores
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
 
 
 module.exports = router;
