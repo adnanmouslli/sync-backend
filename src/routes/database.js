@@ -130,13 +130,18 @@ router.get('/table/:tableName', async (req, res, next) => {
             .query(columnsQuery);
 
         // جلب البيانات مع limit
+        // const dataQuery = `
+        //     SELECT TOP (@limit) *
+        //     FROM [${tableName}]
+        // `;
         const dataQuery = `
-            SELECT TOP (@limit) *
+            SELECT  *
             FROM [${tableName}]
         `;
 
+
         const dataResult = await pool.request()
-            .input('limit', sql.Int, safeLimit)
+            // .input('limit', sql.Int, safeLimit)
             .query(dataQuery);
 
         // جلب عدد السجلات الكامل
