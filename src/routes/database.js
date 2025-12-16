@@ -624,7 +624,6 @@ router.get('/stores-summary', async (req, res, next) => {
             FROM st000 st
             LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID
             LEFT JOIN mt000 mt ON mi.MatGUID = mt.GUID
-            WHERE st.Code IN ('12', '101', '102')
             GROUP BY st.Code, st.Name, st.GUID, st.IsActive
             ORDER BY st.Code
         `;
