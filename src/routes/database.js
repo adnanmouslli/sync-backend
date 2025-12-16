@@ -269,102 +269,18 @@ router.get('/table/:tableName/info', async (req, res, next) => {
  * - limit: عدد المواد المطلوبة (اختياري - يتم تجاهله إذا كان هناك فلتر تاريخ)
  * - period: last_month, last_week, last_3_months, last_year, today
  */
+/**
+ * جلب جميع المواد حسب المستودعات - بدون limit
+ * GET /api/database/materials-by-stores
+ */
 router.get('/materials-by-stores', async (req, res, next) => {
     try {
         const pool = await getPool();
         
-        // قراءة البارامترات
+        // قراءة البارامترات - بدون limit
         const storeCodeFilter = req.query.storeCode;
-        let startDate = req.query.startDate;
-        let endDate = req.query.endDate;
-        const period = req.query.period;
-        const groupGuid = req.query.groupGuid;
         const search = req.query.search;
         const minQty = parseFloat(req.query.minQty) || 0;
-        
-        // تحديد الـ limit بذكاء:
-        // - إذا كان هناك فلتر تاريخ (period أو startDate/endDate) ولم يتم تحديد limit صراحةً → لا limit
-        // - إذا لم يكن هناك فلتر تاريخ → استخدام limit الافتراضي (100)
-        // - إذا تم تحديد limit صراحةً → استخدامه دائماً
-        
-        const hasDateFilter = period || startDate || endDate;
-        const limitProvided = req.query.limit !== undefined;
-        
-        let useLimit = false;
-        let safeLimit = 10000; // قيمة افتراضية كبيرة
-        
-        if (limitProvided) {
-            // المستخدم حدد limit صراحةً
-            useLimit = true;
-            const limit = parseInt(req.query.limit, 10);
-            safeLimit = Math.min(Math.max(limit, 1), 10000);
-        } else if (!hasDateFilter) {
-            // لا يوجد فلتر تاريخ ولم يتم تحديد limit → استخدام الافتراضي
-            useLimit = true;
-            safeLimit = 100;
-        }
-        // else: يوجد فلتر تاريخ ولم يتم تحديد limit → لا نستخدم limit
-        
-        // حساب التاريخ بناءً على الفترة المحددة
-        if (period && !startDate && !endDate) {
-            const now = new Date();
-            
-            switch (period) {
-                case 'today':
-                    const todayStart = new Date(now.setHours(0, 0, 0, 0));
-                    const todayEnd = new Date(now.setHours(23, 59, 59, 999));
-                    startDate = todayStart.toISOString().split('T')[0];
-                    endDate = todayEnd.toISOString().split('T')[0];
-                    break;
-                    
-                case 'last_week':
-                    const lastWeek = new Date();
-                    lastWeek.setDate(lastWeek.getDate() - 7);
-                    startDate = lastWeek.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'last_month':
-                    const lastMonth = new Date();
-                    lastMonth.setMonth(lastMonth.getMonth() - 1);
-                    startDate = lastMonth.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'last_3_months':
-                    const last3Months = new Date();
-                    last3Months.setMonth(last3Months.getMonth() - 3);
-                    startDate = last3Months.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'last_6_months':
-                    const last6Months = new Date();
-                    last6Months.setMonth(last6Months.getMonth() - 6);
-                    startDate = last6Months.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'last_year':
-                    const lastYear = new Date();
-                    lastYear.setFullYear(lastYear.getFullYear() - 1);
-                    startDate = lastYear.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'current_month':
-                    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-                    startDate = firstDayOfMonth.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-                    
-                case 'current_year':
-                    const firstDayOfYear = new Date(now.getFullYear(), 0, 1);
-                    startDate = firstDayOfYear.toISOString().split('T')[0];
-                    endDate = new Date().toISOString().split('T')[0];
-                    break;
-            }
-        }
         
         // بناء شروط WHERE ديناميكية
         let whereConditions = ["st.Code IN ('12', '101', '102')"];
@@ -374,38 +290,20 @@ router.get('/materials-by-stores', async (req, res, next) => {
             whereConditions.push(`st.Code = @storeCodeFilter`);
         }
         
-        if (groupGuid) {
-            whereConditions.push(`mt.GroupGUID = @groupGuid`);
-        }
-        
         if (search) {
             whereConditions.push(`(mt.Name LIKE @search OR mt.Code LIKE @search)`);
         }
         
         if (minQty > 0) {
-            havingConditions.push(`SUM(mi.Qty) >= @minQty`);
-        }
-        
-        // فلتر التاريخ
-        if (startDate || endDate) {
-            const dateConditions = [];
-            if (startDate) {
-                dateConditions.push(`mi.ProductionDate >= @startDate`);
-            }
-            if (endDate) {
-                dateConditions.push(`mi.ProductionDate <= @endDate`);
-            }
-            if (dateConditions.length > 0) {
-                whereConditions.push(`(${dateConditions.join(' AND ')})`);
-            }
+            havingConditions.push(`SUM(ISNULL(mi.Qty, 0)) >= @minQty`);
+        } else {
+            havingConditions.push(`SUM(ISNULL(mi.Qty, 0)) > 0`);
         }
         
         const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
         const havingClause = havingConditions.length > 0 ? `HAVING ${havingConditions.join(' AND ')}` : '';
         
-        // بناء الاستعلام مع أو بدون TOP
-        const topClause = useLimit ? `TOP (@limit)` : '';
-        
+        // الاستعلام بدون TOP - سيجلب كل المواد
         const query = `
             WITH MaterialsInStores AS (
                 SELECT 
@@ -419,14 +317,14 @@ router.get('/materials-by-stores', async (req, res, next) => {
                     mt.Qty AS total_qty,
                     tg.Name AS group_name,
                     tg.GUID AS group_guid,
-                    SUM(mi.Qty) AS store_qty,
-                    AVG(mi.Price) AS avg_price,
+                    SUM(ISNULL(mi.Qty, 0)) AS store_qty,
+                    AVG(ISNULL(mi.Price, 0)) AS avg_price,
                     MAX(mi.ProductionDate) AS last_production_date,
                     MIN(mi.ExpireDate) AS nearest_expire_date,
                     COUNT(mi.GUID) AS transactions_count
                 FROM st000 st
-                LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID
-                LEFT JOIN mt000 mt ON mi.MatGUID = mt.GUID
+                CROSS JOIN mt000 mt
+                LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID AND mt.GUID = mi.MatGUID
                 LEFT JOIN TypesGroup000 tg ON mt.GroupGUID = tg.GUID
                 ${whereClause}
                 GROUP BY 
@@ -435,36 +333,21 @@ router.get('/materials-by-stores', async (req, res, next) => {
                     tg.Name, tg.GUID
                 ${havingClause}
             )
-            SELECT ${topClause} *
+            SELECT *
             FROM MaterialsInStores
-            WHERE store_qty > 0
             ORDER BY store_code, material_name
         `;
         
         let request = pool.request();
         
-        // إضافة limit فقط إذا كان سيتم استخدامه
-        if (useLimit) {
-            request = request.input('limit', sql.Int, safeLimit);
-        }
-        
         if (storeCodeFilter) {
             request = request.input('storeCodeFilter', sql.NVarChar, storeCodeFilter);
-        }
-        if (groupGuid) {
-            request = request.input('groupGuid', sql.UniqueIdentifier, groupGuid);
         }
         if (search) {
             request = request.input('search', sql.NVarChar, `%${search}%`);
         }
         if (minQty > 0) {
             request = request.input('minQty', sql.Float, minQty);
-        }
-        if (startDate) {
-            request = request.input('startDate', sql.DateTime, new Date(startDate));
-        }
-        if (endDate) {
-            request = request.input('endDate', sql.DateTime, new Date(endDate));
         }
         
         const result = await request.query(query);
@@ -531,21 +414,16 @@ router.get('/materials-by-stores', async (req, res, next) => {
         
         res.json({
             success: true,
-            message: 'تم جلب المواد حسب المستودعات بنجاح',
+            message: 'تم جلب جميع المواد حسب المستودعات بنجاح',
             timestamp: new Date().toISOString(),
             filters: {
-                limit_applied: useLimit,
-                limit_value: useLimit ? safeLimit : 'غير محدد',
                 storeCode: storeCodeFilter || 'الكل',
-                period: period || 'custom',
-                startDate: startDate || null,
-                endDate: endDate || null,
-                groupGuid: groupGuid || null,
                 search: search || null,
                 minQty: minQty || 0
             },
             total_stores: response.length,
             total_materials: response.reduce((sum, store) => sum + store.materials_count, 0),
+            total_records_fetched: result.recordset.length,
             stores: response
         });
         
@@ -555,17 +433,8 @@ router.get('/materials-by-stores', async (req, res, next) => {
 });
 
 /**
- * جلب المواد لمستودع محدد مع الفلاتر
+ * جلب المواد لمستودع محدد - بدون limit
  * GET /api/database/materials-by-store/:storeCode
- * Query Parameters:
- * - limit: عدد المواد (افتراضي: 100)
- * - startDate: تاريخ البداية
- * - endDate: تاريخ النهاية
- * - groupGuid: معرف المجموعة
- * - search: البحث
- * - minQty: الكمية الدنيا
- * - sortBy: الترتيب (name, code, qty, date)
- * - sortOrder: اتجاه الترتيب (asc, desc)
  */
 router.get('/materials-by-store/:storeCode', async (req, res, next) => {
     try {
@@ -580,10 +449,7 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
             });
         }
         
-        // قراءة البارامترات
-        const limitProvided = req.query.limit !== undefined;
-        const limit = parseInt(req.query.limit, 10) || 10000;
-        const safeLimit = Math.min(Math.max(limit, 1), 100000);
+        // قراءة البارامترات - بدون limit
         const search = req.query.search;
         const minQty = parseFloat(req.query.minQty) || 0;
         const sortBy = req.query.sortBy || 'name'; // name, code, qty
@@ -601,7 +467,6 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
         if (minQty > 0) {
             havingConditions.push('SUM(ISNULL(mi.Qty, 0)) >= @minQty');
         } else {
-            // جلب المواد التي لها كمية أكبر من 0 فقط
             havingConditions.push('SUM(ISNULL(mi.Qty, 0)) > 0');
         }
         
@@ -623,9 +488,7 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
         }
         orderByClause += ` ${sortOrder.toUpperCase()}`;
         
-        // استعلام محدث مع GROUP BY للحصول على جميع المواد
-        const topClause = limitProvided ? `TOP (@limit)` : '';
-        
+        // استعلام بدون TOP - سيجلب كل المواد
         const query = `
             WITH MaterialsInStore AS (
                 SELECT 
@@ -659,17 +522,13 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
                     tg.Name, tg.GUID
                 ${havingClause}
             )
-            SELECT ${topClause} *
+            SELECT *
             FROM MaterialsInStore
             ${orderByClause}
         `;
         
         let request = pool.request()
             .input('storeCode', sql.NVarChar, storeCode);
-        
-        if (limitProvided) {
-            request = request.input('limit', sql.Int, safeLimit);
-        }
         
         if (search) {
             request = request.input('search', sql.NVarChar, `%${search}%`);
@@ -715,11 +574,9 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
         
         res.json({
             success: true,
-            message: 'تم جلب المواد بنجاح',
+            message: 'تم جلب جميع المواد بنجاح',
             timestamp: new Date().toISOString(),
             filters: {
-                limit_applied: limitProvided,
-                limit_value: limitProvided ? safeLimit : 'غير محدد',
                 search: search || null,
                 minQty: minQty || 0,
                 sortBy: sortBy,
@@ -740,130 +597,6 @@ router.get('/materials-by-store/:storeCode', async (req, res, next) => {
         next(error);
     }
 });
-
-/**
- * Route تجريبي لجلب جميع المواد في المستودع (بدون فلاتر)
- * GET /api/database/materials-by-store/:storeCode/all
- */
-router.get('/materials-by-store/:storeCode/all', async (req, res, next) => {
-    try {
-        const { storeCode } = req.params;
-        const pool = await getPool();
-        
-        // التحقق من كود المستودع
-        if (!['12', '101', '102'].includes(storeCode)) {
-            return res.status(400).json({
-                success: false,
-                message: 'كود المستودع غير صحيح. يجب أن يكون: 12، 101، أو 102'
-            });
-        }
-        
-        // استعلام بسيط لجلب كل المواد
-        const query = `
-            SELECT 
-                st.Code AS store_code,
-                st.Name AS store_name,
-                mt.Code AS material_code,
-                mt.Name AS material_name,
-                mt.Unity AS unity,
-                ISNULL(SUM(mi.Qty), 0) AS store_qty
-            FROM st000 st
-            CROSS JOIN mt000 mt
-            LEFT JOIN MI000 mi ON st.GUID = mi.StoreGUID AND mt.GUID = mi.MatGUID
-            WHERE st.Code = @storeCode
-            GROUP BY st.Code, st.Name, mt.Code, mt.Name, mt.Unity
-            HAVING ISNULL(SUM(mi.Qty), 0) > 0
-            ORDER BY mt.Name
-        `;
-        
-        const result = await pool.request()
-            .input('storeCode', sql.NVarChar, storeCode)
-            .query(query);
-        
-        res.json({
-            success: true,
-            message: 'تم جلب جميع المواد',
-            store_code: storeCode,
-            total_materials: result.recordset.length,
-            materials: result.recordset
-        });
-        
-    } catch (error) {
-        next(error);
-    }
-});
-
-/**
- * Route للتشخيص - فحص عدد المواد في كل جدول
- * GET /api/database/materials-diagnostic/:storeCode
- */
-router.get('/materials-diagnostic/:storeCode', async (req, res, next) => {
-    try {
-        const { storeCode } = req.params;
-        const pool = await getPool();
-        
-        // 1. عدد السجلات في MI000 للمستودع
-        const mi000Count = await pool.request()
-            .input('storeCode', sql.NVarChar, storeCode)
-            .query(`
-                SELECT COUNT(*) AS count
-                FROM MI000 mi
-                INNER JOIN st000 st ON mi.StoreGUID = st.GUID
-                WHERE st.Code = @storeCode
-            `);
-        
-        // 2. عدد المواد المختلفة في MI000 للمستودع
-        const uniqueMaterials = await pool.request()
-            .input('storeCode', sql.NVarChar, storeCode)
-            .query(`
-                SELECT COUNT(DISTINCT mi.MatGUID) AS count
-                FROM MI000 mi
-                INNER JOIN st000 st ON mi.StoreGUID = st.GUID
-                WHERE st.Code = @storeCode
-            `);
-        
-        // 3. إجمالي الكميات
-        const totalQty = await pool.request()
-            .input('storeCode', sql.NVarChar, storeCode)
-            .query(`
-                SELECT SUM(mi.Qty) AS total_qty
-                FROM MI000 mi
-                INNER JOIN st000 st ON mi.StoreGUID = st.GUID
-                WHERE st.Code = @storeCode
-            `);
-        
-        // 4. عدد المواد في جدول mt000
-        const mt000Count = await pool.request()
-            .query(`SELECT COUNT(*) AS count FROM mt000`);
-        
-        // 5. عدد المواد ذات الكمية > 0
-        const materialsWithQty = await pool.request()
-            .input('storeCode', sql.NVarChar, storeCode)
-            .query(`
-                SELECT COUNT(DISTINCT mi.MatGUID) AS count
-                FROM MI000 mi
-                INNER JOIN st000 st ON mi.StoreGUID = st.GUID
-                WHERE st.Code = @storeCode AND mi.Qty > 0
-            `);
-        
-        res.json({
-            success: true,
-            store_code: storeCode,
-            diagnostics: {
-                total_transactions_in_MI000: mi000Count.recordset[0].count,
-                unique_materials_in_MI000: uniqueMaterials.recordset[0].count,
-                materials_with_quantity: materialsWithQty.recordset[0].count,
-                total_quantity: totalQty.recordset[0].total_qty,
-                total_materials_in_mt000: mt000Count.recordset[0].count
-            }
-        });
-        
-    } catch (error) {
-        next(error);
-    }
-});
-
-
 
 
 
