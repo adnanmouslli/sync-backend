@@ -836,75 +836,178 @@ router.get('/stores-detailed-stats', async (req, res, next) => {
 
 
 /**
- * فحص الأدوية المفقودة - مقارنة بين جداول المواد والحركات
- * GET /api/database/debug-missing-materials
+ * جلب جميع المواد مع الفلاتر و Pagination
+ * GET /api/database/materials
+ * Query Parameters:
+ * - search: البحث في اسم أو كود المادة أو الباركود
+ * - groupGuid: فلترة حسب GUID المجموعة
+ * - unity: فلترة حسب الوحدة
+ * - page: رقم الصفحة (افتراضي: 1)
+ * - limit: عدد النتائج في الصفحة (افتراضي: 50)
+ * - sortBy: الترتيب حسب (name, code, qty) - افتراضي: name
+ * - sortOrder: اتجاه الترتيب (asc, desc) - افتراضي: asc
  */
-router.get('/debug-missing-materials', async (req, res, next) => {
+router.get('/materials', async (req, res, next) => {
     try {
         const pool = await getPool();
         
-        // جلب جميع المواد
-        const allMaterialsQuery = `
-            SELECT COUNT(*) AS total_materials
-            FROM mt000
+        // قراءة البارامترات
+        const search = req.query.search;
+        const groupGuid = req.query.groupGuid;
+        const unity = req.query.unity;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const sortBy = req.query.sortBy || 'name';
+        const sortOrder = req.query.sortOrder || 'asc';
+        
+        // حساب OFFSET
+        const offset = (page - 1) * limit;
+        
+        // بناء شروط WHERE
+        let whereConditions = [];
+        
+        if (search) {
+            whereConditions.push(`(mt.Name LIKE @search OR mt.Code LIKE @search OR mt.BarCode LIKE @search)`);
+        }
+        
+        if (groupGuid) {
+            whereConditions.push(`mt.GroupGUID = @groupGuid`);
+        }
+        
+        if (unity) {
+            whereConditions.push(`mt.Unity = @unity`);
+        }
+        
+        const whereClause = whereConditions.length > 0 
+            ? `WHERE ${whereConditions.join(' AND ')}` 
+            : '';
+        
+        // بناء ORDER BY
+        let orderByField = 'mt.Name';
+        switch (sortBy) {
+            case 'code':
+                orderByField = 'mt.Code';
+                break;
+            case 'qty':
+                orderByField = 'mt.Qty';
+                break;
+            case 'name':
+            default:
+                orderByField = 'mt.Name';
+        }
+        const orderByClause = `ORDER BY ${orderByField} ${sortOrder.toUpperCase()}`;
+        
+        // استعلام العد الإجمالي
+        const countQuery = `
+            SELECT COUNT(*) AS total_count
+            FROM mt000 mt
+            ${whereClause}
         `;
         
-        // جلب المواد التي لها حركة في المستودعات المطلوبة
-        const materialsWithMovementQuery = `
-            SELECT COUNT(DISTINCT mt.GUID) AS materials_with_movement
-            FROM MI000 mi
-            INNER JOIN st000 st ON mi.StoreGUID = st.GUID
-            INNER JOIN mt000 mt ON mi.MatGUID = mt.GUID
-            WHERE st.Code IN ('12', '101', '102')
-            AND mi.Qty > 0
-        `;
-        
-        // جلب المواد بدون حركة
-        const materialsWithoutMovementQuery = `
+        // استعلام البيانات مع Pagination
+        const dataQuery = `
             SELECT 
-                mt.Code,
-                mt.Name,
-                mt.GUID,
-                mt.Unity,
-                tg.Name AS group_name
+                mt.GUID AS guid,
+                mt.Code AS code,
+                mt.Name AS name,
+                mt.Unity AS unity,
+                mt.Qty AS quantity,
+                mt.BarCode AS barcode,
+                mt.Company AS company,
+                mt.Origin AS origin,
+                mt.MinLimit AS min_limit,
+                mt.MaxLimit AS max_limit,
+                mt.IsActive AS is_active,
+                tg.GUID AS group_guid,
+                tg.Name AS group_name,
+                tg.Code AS group_code
             FROM mt000 mt
             LEFT JOIN TypesGroup000 tg ON mt.GroupGUID = tg.GUID
-            WHERE mt.GUID NOT IN (
-                SELECT DISTINCT mt2.GUID
-                FROM MI000 mi2
-                INNER JOIN st000 st2 ON mi2.StoreGUID = st2.GUID
-                INNER JOIN mt000 mt2 ON mi2.MatGUID = mt2.GUID
-                WHERE st2.Code IN ('12', '101', '102')
-                AND mi2.Qty > 0
-            )
-            ORDER BY mt.Name
+            ${whereClause}
+            ${orderByClause}
+            OFFSET @offset ROWS 
+            FETCH NEXT @limit ROWS ONLY
         `;
         
-        const [allMaterials, withMovement, withoutMovement] = await Promise.all([
-            pool.request().query(allMaterialsQuery),
-            pool.request().query(materialsWithMovementQuery),
-            pool.request().query(materialsWithoutMovementQuery)
+        // بناء الـ requests
+        let countRequest = pool.request();
+        let dataRequest = pool.request();
+        
+        // إضافة البارامترات
+        if (search) {
+            const searchParam = `%${search}%`;
+            countRequest = countRequest.input('search', sql.NVarChar, searchParam);
+            dataRequest = dataRequest.input('search', sql.NVarChar, searchParam);
+        }
+        
+        if (groupGuid) {
+            countRequest = countRequest.input('groupGuid', sql.UniqueIdentifier, groupGuid);
+            dataRequest = dataRequest.input('groupGuid', sql.UniqueIdentifier, groupGuid);
+        }
+        
+        if (unity) {
+            countRequest = countRequest.input('unity', sql.NVarChar, unity);
+            dataRequest = dataRequest.input('unity', sql.NVarChar, unity);
+        }
+        
+        dataRequest = dataRequest
+            .input('limit', sql.Int, limit)
+            .input('offset', sql.Int, offset);
+        
+        // تنفيذ الاستعلامات
+        const [countResult, dataResult] = await Promise.all([
+            countRequest.query(countQuery),
+            dataRequest.query(dataQuery)
         ]);
+        
+        const totalCount = countResult.recordset[0].total_count;
+        const totalPages = Math.ceil(totalCount / limit);
         
         res.json({
             success: true,
-            message: 'تحليل الأدوية المفقودة',
-            summary: {
-                total_materials: allMaterials.recordset[0].total_materials,
-                materials_with_movement: withMovement.recordset[0].materials_with_movement,
-                materials_without_movement: withoutMovement.recordset.length,
-                percentage_without_movement: (
-                    (withoutMovement.recordset.length / allMaterials.recordset[0].total_materials) * 100
-                ).toFixed(2) + '%'
+            message: 'تم جلب المواد بنجاح',
+            timestamp: new Date().toISOString(),
+            filters: {
+                search: search || null,
+                groupGuid: groupGuid || null,
+                unity: unity || null,
+                sortBy: sortBy,
+                sortOrder: sortOrder
             },
-            materials_without_movement: withoutMovement.recordset.slice(0, 50) // أول 50 مادة
+            pagination: {
+                current_page: page,
+                per_page: limit,
+                total_items: totalCount,
+                total_pages: totalPages,
+                from: offset + 1,
+                to: Math.min(offset + limit, totalCount),
+                has_previous: page > 1,
+                has_next: page < totalPages
+            },
+            materials: dataResult.recordset.map(row => ({
+                guid: row.guid,
+                code: row.code,
+                name: row.name,
+                unity: row.unity,
+                quantity: row.quantity,
+                barcode: row.barcode,
+                company: row.company,
+                origin: row.origin,
+                min_limit: row.min_limit,
+                max_limit: row.max_limit,
+                is_active: row.is_active,
+                group: row.group_guid ? {
+                    guid: row.group_guid,
+                    name: row.group_name,
+                    code: row.group_code
+                } : null
+            }))
         });
         
     } catch (error) {
         next(error);
     }
 });
-
 
 
 module.exports = router;
