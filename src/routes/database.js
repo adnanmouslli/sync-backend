@@ -834,4 +834,77 @@ router.get('/stores-detailed-stats', async (req, res, next) => {
 });
 
 
+
+/**
+ * فحص الأدوية المفقودة - مقارنة بين جداول المواد والحركات
+ * GET /api/database/debug-missing-materials
+ */
+router.get('/debug-missing-materials', async (req, res, next) => {
+    try {
+        const pool = await getPool();
+        
+        // جلب جميع المواد
+        const allMaterialsQuery = `
+            SELECT COUNT(*) AS total_materials
+            FROM mt000
+        `;
+        
+        // جلب المواد التي لها حركة في المستودعات المطلوبة
+        const materialsWithMovementQuery = `
+            SELECT COUNT(DISTINCT mt.GUID) AS materials_with_movement
+            FROM MI000 mi
+            INNER JOIN st000 st ON mi.StoreGUID = st.GUID
+            INNER JOIN mt000 mt ON mi.MatGUID = mt.GUID
+            WHERE st.Code IN ('12', '101', '102')
+            AND mi.Qty > 0
+        `;
+        
+        // جلب المواد بدون حركة
+        const materialsWithoutMovementQuery = `
+            SELECT 
+                mt.Code,
+                mt.Name,
+                mt.GUID,
+                mt.Unity,
+                tg.Name AS group_name
+            FROM mt000 mt
+            LEFT JOIN TypesGroup000 tg ON mt.GroupGUID = tg.GUID
+            WHERE mt.GUID NOT IN (
+                SELECT DISTINCT mt2.GUID
+                FROM MI000 mi2
+                INNER JOIN st000 st2 ON mi2.StoreGUID = st2.GUID
+                INNER JOIN mt000 mt2 ON mi2.MatGUID = mt2.GUID
+                WHERE st2.Code IN ('12', '101', '102')
+                AND mi2.Qty > 0
+            )
+            ORDER BY mt.Name
+        `;
+        
+        const [allMaterials, withMovement, withoutMovement] = await Promise.all([
+            pool.request().query(allMaterialsQuery),
+            pool.request().query(materialsWithMovementQuery),
+            pool.request().query(materialsWithoutMovementQuery)
+        ]);
+        
+        res.json({
+            success: true,
+            message: 'تحليل الأدوية المفقودة',
+            summary: {
+                total_materials: allMaterials.recordset[0].total_materials,
+                materials_with_movement: withMovement.recordset[0].materials_with_movement,
+                materials_without_movement: withoutMovement.recordset.length,
+                percentage_without_movement: (
+                    (withoutMovement.recordset.length / allMaterials.recordset[0].total_materials) * 100
+                ).toFixed(2) + '%'
+            },
+            materials_without_movement: withoutMovement.recordset.slice(0, 50) // أول 50 مادة
+        });
+        
+    } catch (error) {
+        next(error);
+    }
+});
+
+
+
 module.exports = router;
