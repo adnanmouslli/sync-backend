@@ -917,7 +917,6 @@ router.get('/materials', async (req, res, next) => {
                 mt.Origin AS origin,
                 mt.MinLimit AS min_limit,
                 mt.MaxLimit AS max_limit,
-                mt.IsActive AS is_active,
                 tg.GUID AS group_guid,
                 tg.Name AS group_name,
                 tg.Code AS group_code
@@ -995,7 +994,6 @@ router.get('/materials', async (req, res, next) => {
                 origin: row.origin,
                 min_limit: row.min_limit,
                 max_limit: row.max_limit,
-                is_active: row.is_active,
                 group: row.group_guid ? {
                     guid: row.group_guid,
                     name: row.group_name,
@@ -1008,6 +1006,5 @@ router.get('/materials', async (req, res, next) => {
         next(error);
     }
 });
-
 
 module.exports = router;
