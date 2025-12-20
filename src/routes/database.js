@@ -912,7 +912,9 @@ router.get('/materials', async (req, res, next) => {
                 mt.Name AS name,
                 mt.LatinName AS latin_name,
                 mt.Unity AS unity,
-                mt.Qty AS quantity,
+
+                SUM(ISNULL(ms.Qty, 0)) AS quantity,
+
                 mt.BarCode AS barcode,
                 mt.BarCode2 AS barcode2,
                 mt.BarCode3 AS barcode3,
@@ -934,15 +936,31 @@ router.get('/materials', async (req, res, next) => {
                 mt.ProductionFlag AS production_flag,
                 mt.bHide AS is_hidden,
                 mt.OrderLimit AS order_limit,
+
                 tg.GUID AS group_guid,
                 tg.Name AS group_name,
                 tg.Code AS group_code
             FROM mt000 mt
-            LEFT JOIN TypesGroup000 tg ON mt.GroupGUID = tg.GUID
+            LEFT JOIN ms000 ms 
+                ON ms.MatGUID = mt.GUID
+            LEFT JOIN TypesGroup000 tg 
+                ON mt.GroupGUID = tg.GUID
             ${whereClause}
+            GROUP BY
+                mt.GUID, mt.Code, mt.Name, mt.LatinName, mt.Unity,
+                mt.BarCode, mt.BarCode2, mt.BarCode3,
+                mt.Company, mt.Origin, mt.Spec,
+                mt.High, mt.Low, mt.Whole, mt.Retail,
+                mt.LastPrice, mt.AvgPrice, mt.LastPriceDate,
+                mt.Unit2, mt.Unit2Fact, mt.Unit3, mt.Unit3Fact,
+                mt.ExpireFlag, mt.ProductionFlag, mt.bHide,
+                mt.OrderLimit,
+                tg.GUID, tg.Name, tg.Code
             ${orderByClause}
             OFFSET @offset ROWS 
             FETCH NEXT @limit ROWS ONLY
+
+
         `;
         
         // بناء الـ requests
