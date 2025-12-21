@@ -18,7 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(logger);
 
 // Routes
-app.use('/api/database', databaseRoutes);
+app.use('/api/excel', databaseRoutes);
 
 // Error handling
 app.use(notFound);
