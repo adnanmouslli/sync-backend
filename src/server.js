@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
-const { getPool, closePool } = require('../config/database');
+// const { getPool, closePool } = require('../config/database');
 const { errorHandler, notFound, logger } = require('./middleware/errorHandler');
 
 // Routes
@@ -29,7 +29,7 @@ const startServer = async () => {
     try {
         // الاتصال بقاعدة البيانات
         console.log('🔄 جاري الاتصال بقاعدة البيانات...');
-        await getPool();
+        // await getPool();
         
         // بدء الخادم
         app.listen(PORT, () => {
