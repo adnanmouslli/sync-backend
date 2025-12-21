@@ -1,0 +1,15 @@
+services:
+  nodeapp:
+    build: .
+    container_name: sync-backend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    restart: always
+    networks:
+      - hr-network
+
+networks:
+  hr-network:
+    external: true

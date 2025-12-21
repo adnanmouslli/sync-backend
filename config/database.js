@@ -1,18 +1,18 @@
-// const sql = require('mssql');
 require('dotenv').config();
-const sql = require('mssql/msnodesqlv8');
-
+const sql = require('mssql');
 
 const config = {
-    server: 'localhost\\SQLEXPRESS',
-    database: 'hr_arabic',
-    driver: 'ODBC Driver 17 for SQL Server',
+    user: "sa",
+    password: "SqlServer@2025",
+    server: "172.18.0.2", 
+    port: 1433,
+    database: "AmnDb076",
     options: {
-        trustedConnection: true
+        encrypt: false,
+        trustServerCertificate: true,
+        enableArithAbort: true
     }
 };
-
-
 
 
 
@@ -23,21 +23,17 @@ let pool = null;
  * الحصول على اتصال بقاعدة البيانات
  */
 const getPool = async () => {
+    if (pool) return pool;
+
     try {
-        if (pool) {
-            return pool;
-        }
-        
         pool = await sql.connect(config);
-        console.log('✅ تم الاتصال بقاعدة البيانات بنجاح');
-        
+        console.log("✅ Connected to MSSQL");
         return pool;
-    } catch (error) {
-        console.error('❌ خطأ في الاتصال بقاعدة البيانات:', error.message);
-        throw error;
+    } catch (err) {
+        console.error("❌ خطأ في الاتصال بقاعدة البيانات:", err.message);
+        throw err;
     }
 };
-
 /**
  * إغلاق الاتصال
  */
